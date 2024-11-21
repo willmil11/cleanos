@@ -26,6 +26,17 @@ load_kernel:
     int 0x13              ; Call BIOS to read the sectors
     jc disk_error         ; Jump if there's an error
 
+    ; Print "Kernel Loaded" for debugging
+    mov si, success_msg
+print_success:
+    lodsb
+    or al, al
+    jz jump_to_kernel
+    mov ah, 0x0E
+    int 0x10
+    jmp print_success
+
+jump_to_kernel:
     ; Jump to kernel's entry point
     jmp 0x1000:0x0000     ; Far jump to kernel (segment:offset)
 
@@ -44,6 +55,7 @@ halt:
     hlt                   ; Halt the CPU
 
 message db "Loading Kernel...", 0      ; Boot message
+success_msg db "Kernel Loaded!", 0     ; Success message
 error_msg db "Disk Error!", 0          ; Error message
 
 times 510-($-$$) db 0                  ; Pad to 512 bytes
