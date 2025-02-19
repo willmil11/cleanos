@@ -1,0 +1,16 @@
+[package]
+name = "cleanos"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "cleanos"
+crate-type = ["staticlib"]
+
+[profile.dev]
+panic = "abort"
+opt-level = 1
+
+[profile.release]
+panic = "abort"
+opt-level = 2
