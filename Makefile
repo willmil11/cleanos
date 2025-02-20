@@ -1,5 +1,5 @@
 # Configuration
-NIMFLAGS = --os:standalone --noMain --mm:none --cpu:i386 --cc:gcc --passC:"-m32"
+NIMFLAGS = --os:standalone --noMain --mm:none --cpu:i386 --cc:gcc --passC:"-m32" -d:danger
 CFLAGS = -m32 -nostdlib -nostdinc -fno-builtin -fno-stack-protector -nostartfiles -nodefaultlibs -Wall -Wextra -c
 CC = gcc
 LD = ld
