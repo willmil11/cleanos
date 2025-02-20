@@ -392,6 +392,10 @@ proc kmain() {.exportc.} =
   # Print a long string to test wrapping
   print("\n\nHere's a test of line wrapping with a long string: Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla facilisi. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Sed at justo ut magna elementum tincidunt.")
   
+  print("\n\nAnd now we're gonna print dots every 500ms:\n")
+  while true:
+    print(". ")
+    sleep(500)
   # Halt
   while true:
     {.emit: """
