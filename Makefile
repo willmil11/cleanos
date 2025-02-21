@@ -9,7 +9,7 @@ ASMFLAGS = -f elf32
 
 # Files
 KERNEL_NIM = main.nim
-BOOT_ASM = boot.asm
+ASM_FILES = boot.asm
 KERNEL_OBJ = nimcache/@mmain.nim.c.o nimcache/boot.o
 ISO_DIR = isodir
 KERNEL_BIN = $(ISO_DIR)/boot/kernel.bin
@@ -18,17 +18,17 @@ ISO_IMAGE = cleanos.iso
 # Default target
 all: $(ISO_IMAGE)
 
-# Compile Assembly to object file
-nimcache/boot.o: $(BOOT_ASM)
+# Compile Assembly files to object files
+nimcache/%.o: %.asm
 	mkdir -p nimcache
-	$(ASM) $(ASMFLAGS) $(BOOT_ASM) -o nimcache/boot.o
+	$(ASM) $(ASMFLAGS) $< -o $@
 
 # Compile Nim to C and object files
 nim_c: $(KERNEL_NIM)
 	nim c $(NIMFLAGS) --noLinking --nimcache:nimcache $(KERNEL_NIM)
 
 # Build the kernel binary
-$(KERNEL_BIN): nim_c nimcache/boot.o
+$(KERNEL_BIN): nim_c nimcache/boot.o nimcache/keyboard.o
 	mkdir -p $(ISO_DIR)/boot
 	$(LD) $(LDFLAGS) $(KERNEL_OBJ) -o $(KERNEL_BIN)
 

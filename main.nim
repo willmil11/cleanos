@@ -1,4 +1,4 @@
-# main.nim - Ultra minimal Nim kernel
+# main.nim - Ultra minimal Nim kernel with keyboard support
 {.passl: "-nostdlib".}
 {.passc: "-ffreestanding".}
 {.passl: "-fno-stack-protector".}
@@ -60,18 +60,23 @@ void* memset(void* ptr, int value, unsigned int num) {
 }
 """.}
 
-# Port I/O operations
-proc outb(port: uint16, value: uint8) {.exportc.} =
-  {.emit: """
-    __asm__ __volatile__ ("outb %%al, %%dx" : : "a" (`value`), "d" (`port`));
-  """.}
+# Port I/O operations - make them available to C code
+{.emit: """
+// Make I/O functions available to both C and Nim
+unsigned char inb(unsigned short port) {
+  unsigned char ret;
+  __asm__ __volatile__("inb %%dx, %%al" : "=a" (ret) : "d" (port));
+  return ret;
+}
 
-proc inb(port: uint16): uint8 =
-  var ret: uint8
-  {.emit: """
-    __asm__ __volatile__("inb %%dx, %%al" : "=a" (`ret`) : "d" (`port`));
-  """.}
-  return ret
+void outb(unsigned short port, unsigned char value) {
+  __asm__ __volatile__ ("outb %%al, %%dx" : : "a" (value), "d" (port));
+}
+""".}
+
+# Nim wrappers for I/O functions
+proc outb(port: uint16, value: uint8) {.importc, cdecl.}
+proc inb(port: uint16): uint8 {.importc, cdecl.}
 
 # VGA constants
 const
@@ -120,6 +125,13 @@ proc putChar(c: char) =
 proc print*(s: string) =
   for i in 0..<s.len:
     putChar(s[i])
+
+# Print a C-style string to the screen
+proc printCString*(s: cstring) =
+  var i = 0
+  while s[i] != '\0':
+    putChar(s[i])
+    i += 1
 
 # PIT constants
 const 
@@ -351,6 +363,83 @@ proc newObjRC1(typ: pointer): pointer {.exportc, compilerproc.} =
 proc initStackBottomWith(a, b: pointer) {.exportc, compilerproc.} =
   discard
 
+#============================================================================
+# Keyboard Handling (Polling-based)
+#============================================================================
+
+# Keyboard Constants
+const
+  KEYBOARD_DATA_PORT = 0x60'u16
+  KEYBOARD_STATUS_PORT = 0x64'u16
+
+# User defined callback function
+var keyboardCallback: proc(key: cstring) {.cdecl.} = nil
+
+# Register a keyboard callback function
+proc keyboard_input*(callback: proc(key: cstring) {.cdecl.}) =
+  keyboardCallback = callback
+
+# Map scan codes to ASCII characters
+proc scanCodeToAscii(scanCode: uint8): char =
+  # Very simple scancode to ASCII mapping
+  case scanCode:
+    # Numbers (1-9, 0)
+    of 0x02..0x0A: 
+      return char(scanCode - 0x02 + ord('1'))
+    of 0x0B: 
+      return '0'
+    # Letters (A-Z) - will be lowercase
+    of 0x10..0x19: # Q to P
+      return char(scanCode - 0x10 + ord('q'))
+    of 0x1E..0x26: # A to L
+      return char(scanCode - 0x1E + ord('a'))
+    of 0x2C..0x32: # Z to M
+      return char(scanCode - 0x2C + ord('z'))
+    # Special keys
+    of 0x39: return ' '  # Space
+    of 0x1C: return '\n' # Enter
+    of 0x0E: return '\b' # Backspace
+    of 0x0F: return '\t' # Tab
+    of 0x2B: return '\\' # Backslash
+    of 0x27: return ';'  # Semicolon
+    of 0x28: return '\'' # Quote
+    of 0x33: return ','  # Comma
+    of 0x34: return '.'  # Period
+    of 0x35: return '/'  # Slash
+    of 0x1A: return '['  # Left bracket
+    of 0x1B: return ']'  # Right bracket
+    of 0x29: return '`'  # Backtick
+    of 0x0C: return '-'  # Minus
+    of 0x0D: return '='  # Equals
+    else: return '\0'
+
+# Poll the keyboard for input
+proc pollKeyboard() =
+  # Check if there's data to read
+  let status = inb(KEYBOARD_STATUS_PORT)
+  if (status and 0x01) == 0:
+    return
+  
+  # Read the scancode
+  let scanCode = inb(KEYBOARD_DATA_PORT)
+  
+  # Only process key presses (not releases)
+  if scanCode < 0x80:
+    # Convert to ASCII
+    let key = scanCodeToAscii(scanCode)
+    
+    # Process key if it was recognized
+    if key != '\0':
+      # Direct key echo to screen
+      putChar(key)
+      
+      # Call user-defined callback if registered
+      if keyboardCallback != nil:
+        var keyStr: array[2, char]
+        keyStr[0] = key
+        keyStr[1] = '\0'
+        keyboardCallback(cast[cstring](addr keyStr[0]))
+
 # Main kernel function
 proc kmain() {.exportc.} =
   # Clear the screen
@@ -365,39 +454,23 @@ proc kmain() {.exportc.} =
   # Initialize PIT
   initPIT()
   
-  # Test our print function with a string
-  print("Hello Nim OS!")
-  print("\nCalibrating timers...")
+  # Main welcome message
+  print("Cleanos Keyboard Demo\n")
+  print("----------------------\n")
+  print("Keyboard polling initialized\n")
+  print("Try typing on your keyboard...\n\n")
   
-  # Run calibration with custom parameters for higher precision
-  let highPrecisionParams = CalibrationParams(
-    targetDurationMs: 100,     # Longer test duration for more accuracy
-    iterations: 10,           # More iterations for better averaging
-    tolerance: 2,             # Lower tolerance (2%) for higher precision
-    samplingMultiplier: 20    # Higher sampling multiplier for more data points
+  # Register keyboard callback (optional)
+  keyboard_input(proc(key: cstring) {.cdecl.} =
+    # This is a simple echo callback
+    # All processing is already done in pollKeyboard
+    discard
   )
-  calibrateSleep(highPrecisionParams)
   
-  print(" done!")
-  
-  print("\nWaiting for 2 seconds...")
-  
-  # Sleep for 2 seconds (no dots)
-  sleep(2000)
-  
-  print("\nAfter 2 second sleep")
-  print("\nThis is a test of our print function.")
-  print("\nIt supports newlines, wrapping, and scrolling.")
-  
-  # Print a long string to test wrapping
-  print("\n\nHere's a test of line wrapping with a long string: Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla facilisi. Vestibulum ante ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; Sed at justo ut magna elementum tincidunt.")
-  
-  print("\n\nAnd now we're gonna print dots every 500ms:\n")
+  # Main loop - poll the keyboard 
   while true:
-    print(". ")
-    sleep(500)
-  # Halt
-  while true:
-    {.emit: """
-      asm volatile ("hlt");
-    """.}
+    # Poll for keyboard input
+    pollKeyboard()
+    
+    # Add a small delay to reduce CPU usage
+    sleep(10)
