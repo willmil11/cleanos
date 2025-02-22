@@ -78,24 +78,46 @@ void outb(unsigned short port, unsigned char value) {
 proc outb(port: uint16, value: uint8) {.importc, cdecl.}
 proc inb(port: uint16): uint8 {.importc, cdecl.}
 
-# VGA constants
+# VGA and CRT constants
 const
   VGA_WIDTH = 80
   VGA_HEIGHT = 25
   VGA_MEMORY = 0xB8000
   VGA_COLOR = 0x0F00'u16  # White on black
+  # CRT Control Register ports
+  CRTC_ADDR_PORT = 0x3D4'u16
+  CRTC_DATA_PORT = 0x3D5'u16
+  # CRT cursor position registers
+  CRTC_CURSOR_HIGH = 0x0E'u8
+  CRTC_CURSOR_LOW = 0x0F'u8
 
 # Global cursor position
 var
   cursorX {.exportc.}: int = 0
   cursorY {.exportc.}: int = 0
 
+# Update hardware cursor position
+proc updateCursor() =
+  let pos = (cursorY * VGA_WIDTH + cursorX).uint16
+  
+  # Set high cursor byte
+  outb(CRTC_ADDR_PORT, CRTC_CURSOR_HIGH)
+  outb(CRTC_DATA_PORT, uint8((pos shr 8) and 0xFF'u16))
+  
+  # Set low cursor byte
+  outb(CRTC_ADDR_PORT, CRTC_CURSOR_LOW)
+  outb(CRTC_DATA_PORT, uint8(pos and 0xFF'u16))
+
 # Print a character to the screen
 proc putChar(c: char) =
   let vga = cast[ptr UncheckedArray[uint16]](VGA_MEMORY)
   
-  if c == '\n':
-    # Handle newline
+  if c == '\b':
+    if cursorX > 0:
+      cursorX -= 1
+      # Clear the character at current position
+      vga[cursorY * VGA_WIDTH + cursorX] = VGA_COLOR or ' '.uint16
+  elif c == '\n':
     cursorX = 0
     cursorY += 1
   else:
@@ -120,6 +142,9 @@ proc putChar(c: char) =
       vga[(VGA_HEIGHT-1) * VGA_WIDTH + x] = VGA_COLOR or ' '.uint16
     
     cursorY = VGA_HEIGHT - 1
+  
+  # Update hardware cursor
+  updateCursor()
 
 # Print a string to the screen
 proc print*(s: string) =
@@ -372,8 +397,10 @@ const
   KEYBOARD_DATA_PORT = 0x60'u16
   KEYBOARD_STATUS_PORT = 0x64'u16
 
-# User defined callback function
-var keyboardCallback: proc(key: cstring) {.cdecl.} = nil
+# Keyboard state
+var
+  shiftPressed = false
+  keyboardCallback: proc(key: cstring) {.cdecl.} = nil  # User defined callback function
 
 # Register a keyboard callback function
 proc keyboard_input*(callback: proc(key: cstring) {.cdecl.}) =
@@ -381,36 +408,57 @@ proc keyboard_input*(callback: proc(key: cstring) {.cdecl.}) =
 
 # Map scan codes to ASCII characters
 proc scanCodeToAscii(scanCode: uint8): char =
-  # Very simple scancode to ASCII mapping
   case scanCode:
-    # Numbers (1-9, 0)
-    of 0x02..0x0A: 
-      return char(scanCode - 0x02 + ord('1'))
-    of 0x0B: 
-      return '0'
-    # Letters (A-Z) - will be lowercase
-    of 0x10..0x19: # Q to P
-      return char(scanCode - 0x10 + ord('q'))
-    of 0x1E..0x26: # A to L
-      return char(scanCode - 0x1E + ord('a'))
-    of 0x2C..0x32: # Z to M
-      return char(scanCode - 0x2C + ord('z'))
+    # Numbers row (AZERTY)
+    of 0x02: return (if shiftPressed: '1' else: '&')
+    of 0x03: return (if shiftPressed: '2' else: 'e')  # é/2
+    of 0x04: return (if shiftPressed: '3' else: '"')
+    of 0x05: return (if shiftPressed: '4' else: '\'')
+    of 0x06: return (if shiftPressed: '5' else: '(')
+    of 0x07: return (if shiftPressed: '6' else: '-')
+    of 0x08: return (if shiftPressed: '7' else: 'e')  # è/7
+    of 0x09: return (if shiftPressed: '8' else: '_')
+    of 0x0A: return (if shiftPressed: '9' else: 'c')  # ç/9
+    of 0x0B: return (if shiftPressed: '0' else: 'a')  # à/0
+    of 0x0C: return (if shiftPressed: '\0' else: ')')
+    of 0x0D: return (if shiftPressed: '+' else: '=')
+    # Letters (AZERTY layout)
+    of 0x10: return (if shiftPressed: 'A' else: 'a')
+    of 0x11: return (if shiftPressed: 'Z' else: 'z')
+    of 0x12: return (if shiftPressed: 'E' else: 'e')
+    of 0x13: return (if shiftPressed: 'R' else: 'r')
+    of 0x14: return (if shiftPressed: 'T' else: 't')
+    of 0x15: return (if shiftPressed: 'Y' else: 'y')
+    of 0x16: return (if shiftPressed: 'U' else: 'u')
+    of 0x17: return (if shiftPressed: 'I' else: 'i')
+    of 0x18: return (if shiftPressed: 'O' else: 'o')
+    of 0x19: return (if shiftPressed: 'P' else: 'p')
+    of 0x1E: return (if shiftPressed: 'Q' else: 'q')
+    of 0x1F: return (if shiftPressed: 'S' else: 's')
+    of 0x20: return (if shiftPressed: 'D' else: 'd')
+    of 0x21: return (if shiftPressed: 'F' else: 'f')
+    of 0x22: return (if shiftPressed: 'G' else: 'g')
+    of 0x23: return (if shiftPressed: 'H' else: 'h')
+    of 0x24: return (if shiftPressed: 'J' else: 'j')
+    of 0x25: return (if shiftPressed: 'K' else: 'k')
+    of 0x26: return (if shiftPressed: 'L' else: 'l')
+    of 0x27: return (if shiftPressed: 'M' else: 'm')
+    of 0x2C: return (if shiftPressed: 'W' else: 'w')
+    of 0x2D: return (if shiftPressed: 'X' else: 'x')
+    of 0x2E: return (if shiftPressed: 'C' else: 'c')
+    of 0x2F: return (if shiftPressed: 'V' else: 'v')
+    of 0x30: return (if shiftPressed: 'B' else: 'b')
+    of 0x31: return (if shiftPressed: 'N' else: 'n')
+    of 0x32: return (if shiftPressed: '?' else: ',')
+    # Punctuation keys
+    of 0x33: return (if shiftPressed: '.' else: ';')
+    of 0x34: return (if shiftPressed: '/' else: ':')
+    of 0x35: return (if shiftPressed: '\0' else: '!')
     # Special keys
     of 0x39: return ' '  # Space
     of 0x1C: return '\n' # Enter
     of 0x0E: return '\b' # Backspace
     of 0x0F: return '\t' # Tab
-    of 0x2B: return '\\' # Backslash
-    of 0x27: return ';'  # Semicolon
-    of 0x28: return '\'' # Quote
-    of 0x33: return ','  # Comma
-    of 0x34: return '.'  # Period
-    of 0x35: return '/'  # Slash
-    of 0x1A: return '['  # Left bracket
-    of 0x1B: return ']'  # Right bracket
-    of 0x29: return '`'  # Backtick
-    of 0x0C: return '-'  # Minus
-    of 0x0D: return '='  # Equals
     else: return '\0'
 
 # Poll the keyboard for input
@@ -422,6 +470,12 @@ proc pollKeyboard() =
   
   # Read the scancode
   let scanCode = inb(KEYBOARD_DATA_PORT)
+  
+  # Handle shift key state
+  if scanCode == 0x2A or scanCode == 0x36:  # Left or right shift pressed
+    shiftPressed = true
+  elif scanCode == 0xAA or scanCode == 0xB6:  # Left or right shift released
+    shiftPressed = false
   
   # Only process key presses (not releases)
   if scanCode < 0x80:
